@@ -1,0 +1,17 @@
+name: strict
+intake:
+  limits:
+    max_total_bytes: 4294967296        # 4 GiB
+    max_file_count: 10000
+    max_archive_depth: 5
+    max_compression_ratio: 100         # per member / stream, uncompressed:compressed
+    compression_ratio_min_bytes: 1048576  # ratio only enforced above 1 MiB of output
+    max_safetensors_header_bytes: 104857600  # 100 MiB
+    max_path_bytes: 4096
+    max_config_bytes: 67108864         # 64 MiB, config/tokenizer JSON read cap
+  severities:
+    format_mismatch: warning
+    unknown_format: warning
+    archive_member_rejected: critical
+    local_special_file: warning
+    type_mismatch: warning
