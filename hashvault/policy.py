@@ -45,11 +45,31 @@ class IntakePolicy(BaseModel):
     severities: IntakeSeverities = Field(default_factory=IntakeSeverities)
 
 
+class StaticSeverities(BaseModel):
+    """Default severities for static checks. The scanner does not hard-code these."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pickle_dangerous_callable: Severity = "critical"
+    pickle_unknown_global: Severity = "warning"
+    safetensors_structure: Severity = "critical"
+    safetensors_trailing_bytes: Severity = "critical"
+    npy_object_dtype: Severity = "critical"
+    custom_code_present: Severity = "warning"
+
+
+class StaticPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    severities: StaticSeverities = Field(default_factory=StaticSeverities)
+
+
 class Policy(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     name: str = "strict"
     intake: IntakePolicy = Field(default_factory=IntakePolicy)
+    static: StaticPolicy = Field(default_factory=StaticPolicy)
 
 
 BUILTIN_PROFILES = {"strict"}

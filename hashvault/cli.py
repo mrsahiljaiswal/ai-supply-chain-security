@@ -10,11 +10,16 @@ from pydantic import ValidationError
 from hashvault.contracts.checks import CheckResult
 from hashvault.contracts.manifest import ArtifactManifest
 from hashvault.contracts.request import ScanRequest
+from hashvault.inspectors.static import InspectorReport, scan_static
 from hashvault.intake.pipeline import run_intake
 from hashvault.policy import PolicyError, load_policy
 
 EXIT_USAGE = 2
 EXIT_UNDETERMINED = 20
+EXIT_BLOCKED = 30
+UNDETERMINED_NOTE = (
+    "The verdict is Undetermined because provenance and behavioural have not run."
+)
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="HashVault model artifact scanner")
 
@@ -78,7 +83,13 @@ def _execute(
     return req, manifest, checks
 
 
-def _emit(req: ScanRequest, manifest: ArtifactManifest, checks: list[CheckResult], extra: dict | None = None):
+def _emit(
+    req: ScanRequest,
+    manifest: ArtifactManifest,
+    checks: list[CheckResult],
+    extra: dict | None = None,
+    kind: str = "intake",
+):
     payload = {
         "request": json.loads(req.model_dump_json()),
         "manifest": json.loads(manifest.model_dump_json()),
@@ -90,8 +101,27 @@ def _emit(req: ScanRequest, manifest: ArtifactManifest, checks: list[CheckResult
     if req.output_dir:
         out = Path(req.output_dir)
         out.mkdir(parents=True, exist_ok=True)
-        (out / f"{manifest.scan_id}.intake.json").write_text(text + "\n", encoding="utf-8")
+        (out / f"{manifest.scan_id}.{kind}.json").write_text(text + "\n", encoding="utf-8")
     sys.stdout.write(text + "\n")
+
+
+def _static_decision(report: InspectorReport) -> tuple[str, str, int]:
+    """Interim gate. Only a full verdict engine may return Trusted, so scan never exits 0."""
+    critical = [f for f in report.findings if f.severity == "critical"]
+    errors = [c for c in report.checks if c.status == "error"]
+    if critical:
+        return (
+            "Blocked",
+            "Critical static finding. Provenance and behavioural have not run.",
+            EXIT_BLOCKED,
+        )
+    if errors:
+        return (
+            "Undetermined",
+            "A static check status is error. " + UNDETERMINED_NOTE,
+            EXIT_UNDETERMINED,
+        )
+    return "Undetermined", UNDETERMINED_NOTE, EXIT_UNDETERMINED
 
 
 ArtifactArg = Annotated[Optional[str], typer.Argument(help="Local dir/file/archive, or org/name@rev")]
@@ -144,15 +174,33 @@ def scan(
     work_dir: WorkOpt = None,
     request: RequestOpt = None,
 ) -> None:
-    """Full scan. Only intake is implemented; exits 20 (Undetermined) until inspectors exist."""
+    """Run intake and the static scanner. Provenance and behavioural are not run."""
     req, manifest, checks = _execute(artifact, base, base_revision, base_sha256, publisher, repo,
                                      artifact_type, policy, allow_network, out, work_dir, request)
+    try:
+        pol = load_policy(req.policy_profile)
+    except PolicyError as exc:
+        _fail_usage(str(exc))
+    try:
+        report = scan_static(manifest, pol)
+    except Exception as exc:
+        note = f"Static scanner failed ({type(exc).__name__}: {exc}). {UNDETERMINED_NOTE}"
+        _emit(req, manifest, checks, {
+            "verdict": "Undetermined",
+            "note": note,
+            "findings": [],
+        }, kind="scan")
+        typer.echo(f"hashvault: {note}", err=True)
+        raise typer.Exit(EXIT_UNDETERMINED)
+    verdict, note, code = _static_decision(report)
     _emit(req, manifest, checks, {
-        "verdict": "Undetermined",
-        "note": "static, provenance and behavioural inspectors are not yet implemented",
-    })
-    typer.echo("hashvault: inspectors not yet implemented; verdict Undetermined", err=True)
-    raise typer.Exit(EXIT_UNDETERMINED)
+        "static": json.loads(report.model_dump_json()),
+        "findings": [json.loads(f.model_dump_json()) for f in report.findings],
+        "verdict": verdict,
+        "note": note,
+    }, kind="scan")
+    typer.echo(f"hashvault: {note}", err=True)
+    raise typer.Exit(code)
 
 
 def main() -> None:

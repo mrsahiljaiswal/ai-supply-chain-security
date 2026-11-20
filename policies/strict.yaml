@@ -15,3 +15,11 @@ intake:
     archive_member_rejected: critical
     local_special_file: warning
     type_mismatch: warning
+static:
+  severities:
+    pickle_dangerous_callable: critical
+    pickle_unknown_global: warning
+    safetensors_structure: critical
+    safetensors_trailing_bytes: critical
+    npy_object_dtype: critical
+    custom_code_present: warning
