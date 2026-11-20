@@ -1,0 +1,9 @@
+{
+  "model_type": "tiny",
+  "architectures": [
+    "TinyForCausalLM"
+  ],
+  "hidden_size": 8,
+  "num_hidden_layers": 2,
+  "vocab_size": 32
+}
