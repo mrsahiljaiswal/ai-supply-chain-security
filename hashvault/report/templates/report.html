@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>HashVault {{ classification }} {{ rule_id }}</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      margin: 0;
+      background: #f3efe6;
+      color: #1c1915;
+      font-family: Georgia, "Iowan Old Style", Palatino, serif;
+      line-height: 1.45;
+    }
+    main { max-width: 920px; margin: 0 auto; padding: 2rem 1.25rem 3rem; }
+    header { border-bottom: 3px solid #1c1915; margin-bottom: 1.5rem; padding-bottom: 1rem; }
+    h1, h2, h3, .meta, table { font-family: "Segoe UI", Helvetica, Arial, sans-serif; }
+    h3 { font-size: 1rem; margin: 0.9rem 0 0.25rem; }
+    h1 { font-size: 2rem; margin: 0.15rem 0; }
+    h2 { font-size: 1.15rem; margin: 1.6rem 0 0.5rem; }
+    p { margin: 0.35rem 0; }
+    .kicker { letter-spacing: 0.08em; text-transform: uppercase; font-size: 0.78rem; margin: 0; }
+    .verdict.blocked { color: #8f1d1d; }
+    .verdict.conditional { color: #8a4b08; }
+    .verdict.undetermined { color: #334155; }
+    .verdict.trusted { color: #166534; }
+    .verdict.other { color: #1c1915; }
+    dl { display: grid; grid-template-columns: 9rem 1fr; gap: 0.35rem 0.75rem; margin: 0; }
+    dt { font-weight: 700; }
+    dd { margin: 0; }
+    table { width: 100%; border-collapse: collapse; background: #fffdf8; font-size: 0.95rem; }
+    th, td { border: 1px solid #d9d2c5; padding: 0.45rem 0.6rem; text-align: left; vertical-align: top; }
+    th { background: #ebe4d8; }
+    code, .hash { font-family: Consolas, "Liberation Mono", monospace; font-size: 0.92em; word-break: break-all; }
+    .sev-critical { color: #8f1d1d; font-weight: 700; }
+    .sev-warning { color: #8a4b08; font-weight: 700; }
+    .callout { background: #fffdf8; border-left: 4px solid #8f1d1d; padding: 0.65rem 0.85rem; }
+    ul { margin: 0.3rem 0 0; padding-left: 1.2rem; }
+    footer { margin-top: 2rem; color: #444; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="kicker">HashVault evidence report</p>
+    <h1 class="verdict {{ classification_class }}">{{ classification }}</h1>
+    <p class="meta">Exit code {{ exit_code }}</p>
+    <p class="meta">Deciding rule <code>{{ rule_id }}</code></p>
+    <p>{{ reason }}</p>
+    {% if critical_finding_ids %}
+    <p>Critical finding ids: {% for check_id in critical_finding_ids %}<code>{{ check_id }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>
+    {% endif %}
+  </header>
+
+  <section>
+    <h2>Artifact</h2>
+    <dl>
+      <dt>Type</dt>
+      <dd>{{ artifact_type }}</dd>
+      <dt>Root hash</dt>
+      <dd><code class="hash">{{ root_sha256 }}</code></dd>
+      <dt>Source</dt>
+      <dd>{{ source }}</dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>Findings</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Severity</th>
+          <th>Check id</th>
+          <th>Message</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if findings %}
+        {% for finding in findings %}
+        <tr>
+          <td class="sev-{{ finding.severity_class }}">{{ finding.severity }}</td>
+          <td><code>{{ finding.check_id }}</code></td>
+          <td>{{ finding.message }}</td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr>
+          <td colspan="3">No findings.</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Inspector coverage</h2>
+    {% for report in coverage %}
+    <h3>{{ report.inspector }}</h3>
+    {% if report.lines %}
+    <ul>
+      {% for line in report.lines %}
+      <li>{{ line }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p>No coverage notes.</p>
+    {% endif %}
+    {% endfor %}
+    {% if not coverage %}
+    <p>No inspector reports.</p>
+    {% endif %}
+  </section>
+
+  {% if behavioural %}
+  <section class="callout">
+    <h2>Behavioural inspector</h2>
+    {% if behavioural.summary == "skipped" %}
+    <p>Behavioural inspection was skipped: {{ behavioural.reason }}. A skip is not a pass.</p>
+    {% elif behavioural.summary == "error" %}
+    <p>Behavioural inspection errored: {{ behavioural.reason }}. An error is not a pass.</p>
+    {% else %}
+    <p>Behavioural inspection ran. The check statuses below are the probe results.</p>
+    {% endif %}
+    <p>A behavioural pass is not proof that the model has no backdoor.</p>
+    {% if behavioural.checks %}
+    <table>
+      <thead>
+        <tr>
+          <th>Check id</th>
+          <th>Status</th>
+          <th>Reason</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for check in behavioural.checks %}
+        <tr>
+          <td><code>{{ check.check_id }}</code></td>
+          <td>{{ check.status }}</td>
+          <td>{{ check.reason }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  <footer>
+    <p>Tool {{ tool_version }}. Policy {{ policy_profile }}. Bundle timestamp {{ timestamp }}.</p>
+  </footer>
+</main>
+</body>
+</html>

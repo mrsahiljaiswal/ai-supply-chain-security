@@ -39,8 +39,16 @@ hashvault scan ./models/support-bot-lora \
 ```
 
 `intake` prints `{request, manifest, checks}` as JSON (and writes `<scan-id>.intake.json` to `--out`).
-`scan` prints the evidence bundle as JSON and writes `hashvault-report-<scan-id>.json` to `--out`
-(a directory, or a `.json` file path). With no `--out`, that file is written in the working directory.
+`intake` does not write HTML. `scan` prints the evidence bundle as JSON and writes
+`hashvault-report-<scan-id>.json` and `hashvault-report-<scan-id>.html` to `--out`
+(a directory, or a `.json` file path, with the HTML file using `.html` in place of `.json`).
+With no `--out`, both files are written in the working directory. The HTML report is one file:
+no network, no external stylesheets, and no JavaScript.
+
+`hashvault score corpus/` scans each labelled row with the command from `corpus/README.md`
+(and `--registry corpus/registry.yaml`) and writes `corpus/scorecard.json` and
+`corpus/scorecard.md`. The scorecard records the strict detection rate, the caught rate,
+the false-positive rate, and per-artifact scan time.
 Staged files live in `--work-dir` (default `./work`, or `$HASHVAULT_WORK_DIR`) under
 `<scan-id>/artifact/` (copied input) and `<scan-id>/expanded/` (archive members, stored as numbered
 blobs and never by member name). Both are made read-only after intake.

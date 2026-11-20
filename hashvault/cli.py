@@ -1,5 +1,6 @@
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Optional
 
@@ -19,7 +20,9 @@ from hashvault.inspectors.provenance import RegistryError, scan_provenance
 from hashvault.inspectors.static import InspectorReport, scan_static
 from hashvault.intake.pipeline import run_intake
 from hashvault.policy import PolicyError, load_policy
-from hashvault.verdict import decide, render_bundle
+from hashvault.report.render import write_html_report
+from hashvault.scorecard import ScoreError, format_summary, score_corpus
+from hashvault.verdict import EvidenceBundle, decide, render_bundle
 
 EXIT_USAGE = 2
 
@@ -107,6 +110,17 @@ def _emit(
     sys.stdout.write(text + "\n")
 
 
+@dataclass
+class ScanOutput:
+    """What one ``scan`` invocation writes and decides."""
+
+    exit_code: int
+    text: str
+    bundle: EvidenceBundle
+    json_path: Path
+    html_path: Path
+
+
 def _write_bundle(req: ScanRequest, scan_id: str, text: str) -> Path:
     """Write the evidence bundle. ``--out`` is a directory, or a .json file path."""
     if req.output_dir:
@@ -192,29 +206,23 @@ def intake(
     _emit(req, manifest, checks)
 
 
-@app.command()
-def scan(
-    artifact: ArtifactArg = None,
-    base: BaseOpt = None,
-    base_revision: BaseRevOpt = None,
-    base_sha256: BaseShaOpt = None,
-    publisher: PublisherOpt = None,
-    repo: RepoOpt = None,
-    artifact_type: TypeOpt = None,
-    policy: PolicyOpt = None,
-    allow_network: NetOpt = False,
-    out: OutOpt = None,
-    work_dir: WorkOpt = None,
-    request: RequestOpt = None,
-    registry: RegistryOpt = None,
-    base_dir: BaseDirOpt = None,
-) -> None:
-    """Run intake, static, provenance, and behavioural eligibility, then the verdict.
-
-    Weights are loaded only inside the behavioural container, and only after
-    eligibility. A skip or a container error does not reach Trusted. The verdict
-    engine chooses the exit code.
-    """
+def perform_scan(
+    artifact=None,
+    base=None,
+    base_revision=None,
+    base_sha256=None,
+    publisher=None,
+    repo=None,
+    artifact_type=None,
+    policy=None,
+    allow_network=False,
+    out=None,
+    work_dir=None,
+    request=None,
+    registry=None,
+    base_dir=None,
+) -> ScanOutput:
+    """Run the scan command's inspectors and write the JSON bundle and HTML report."""
     req, manifest, checks = _execute(artifact, base, base_revision, base_sha256, publisher, repo,
                                      artifact_type, policy, allow_network, out, work_dir, request)
     try:
@@ -246,14 +254,64 @@ def scan(
         behavioural_report = _behavioural_failure(exc)
     bundle = decide(req, manifest, checks, [static_report, prov_report, behavioural_report], pol)
     text = render_bundle(bundle)
-    _write_bundle(req, manifest.scan_id, text)
-    sys.stdout.write(text)
-    verdict = bundle.verdict
+    json_path = _write_bundle(req, manifest.scan_id, text)
+    html_path = write_html_report(bundle, json_path.with_suffix(".html"))
+    return ScanOutput(
+        exit_code=bundle.verdict.exit_code,
+        text=text,
+        bundle=bundle,
+        json_path=json_path,
+        html_path=html_path,
+    )
+
+
+@app.command()
+def scan(
+    artifact: ArtifactArg = None,
+    base: BaseOpt = None,
+    base_revision: BaseRevOpt = None,
+    base_sha256: BaseShaOpt = None,
+    publisher: PublisherOpt = None,
+    repo: RepoOpt = None,
+    artifact_type: TypeOpt = None,
+    policy: PolicyOpt = None,
+    allow_network: NetOpt = False,
+    out: OutOpt = None,
+    work_dir: WorkOpt = None,
+    request: RequestOpt = None,
+    registry: RegistryOpt = None,
+    base_dir: BaseDirOpt = None,
+) -> None:
+    """Run intake, static, provenance, and behavioural eligibility, then the verdict.
+
+    Weights are loaded only inside the behavioural container, and only after
+    eligibility. A skip or a container error does not reach Trusted. The verdict
+    engine chooses the exit code. The HTML report is written beside the JSON bundle.
+    """
+    output = perform_scan(
+        artifact, base, base_revision, base_sha256, publisher, repo, artifact_type, policy,
+        allow_network, out, work_dir, request, registry, base_dir,
+    )
+    sys.stdout.write(output.text)
+    verdict = output.bundle.verdict
     typer.echo(
         f"hashvault: {verdict.classification} {verdict.rule_id}: {verdict.reason}",
         err=True,
     )
+    typer.echo(f"hashvault: html report written to {output.html_path}", err=True)
     raise typer.Exit(verdict.exit_code)
+
+
+@app.command()
+def score(
+    corpus: Annotated[Path, typer.Argument(help="Corpus directory with manifest.csv and README.md")],
+) -> None:
+    """Score a labelled corpus and write scorecard.json and scorecard.md beside the manifest."""
+    try:
+        card = score_corpus(corpus, perform_scan)
+    except ScoreError as exc:
+        _fail_usage(str(exc))
+    typer.echo(format_summary(card))
 
 
 def main() -> None:
