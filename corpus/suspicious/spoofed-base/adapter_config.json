@@ -1,0 +1,7 @@
+{
+  "base_model_name_or_path": "evil/not-the-base",
+  "r": 4,
+  "target_modules": [
+    "q_proj"
+  ]
+}

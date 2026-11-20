@@ -1,0 +1,11 @@
+name,path,label,attack,expected_check,expected_severity,notes
+tiny-full-model,corpus/clean/tiny-full-model,clean,none,none,none,Known-good full model. Registered as acme/tiny-base. Static safetensors checks should pass.
+tiny-lora,corpus/clean/tiny-lora,clean,none,none,none,Known-good LoRA. adapter_config claims base acme/tiny-base. Requires --base acme/tiny-base.
+marker-pickle,corpus/suspicious/marker-pickle,suspicious,dangerous-callable,pickle_dangerous_callable,critical,model.pickle opcode stream GLOBALs os.system and stops. Bytes only; not a payload and not unpickled. os is on the static deny list.
+disguised-pickle,corpus/suspicious/disguised-pickle,suspicious,format-mismatch,intake.format_mismatch;pickle_dangerous_callable,warning;critical,"Same marker pickle bytes as marker-pickle, saved as model.safetensors. Extension disagrees with pickle magic."
+trailing-bytes,corpus/suspicious/trailing-bytes,suspicious,trailing-bytes,safetensors_trailing_bytes,critical,Clean full model whose model.safetensors has the ASCII bytes HASHVAULT_MARKER appended and nothing else.
+spoofed-base,corpus/suspicious/spoofed-base,suspicious,spoofed-lineage,provenance_base_claim,warning,"Clean LoRA weights. adapter_config.json claims base_model_name_or_path evil/not-the-base. Spoofed lineage, not a behavioural backdoor."
+lookalike-name,corpus/suspicious/lookalike-name,suspicious,typosquat,provenance_typosquat,warning,"Clean full model bytes plus scan.yaml. Claimed repo is acme/tiny-bose, one character off acme/tiny-base. Scan with --repo acme/tiny-bose."
+config-mismatch,corpus/suspicious/config-mismatch,suspicious,config-mismatch,provenance_config,warning,Clean weights. config.json hidden_size is 999; the registry entry for acme/tiny-base says 8.
+hash-mismatch,corpus/suspicious/hash-mismatch,suspicious,hash-mismatch,provenance_hash_match,critical,"Clean full model plus README.txt containing the word extra, and scan.yaml claiming repo acme/tiny-base. Root hash differs from the registry."
+nested-torch-zip,corpus/suspicious/nested-torch-zip,suspicious,nested-pickle,pickle_dangerous_callable,critical,model.bin is a zip containing archive/data.pkl. That member is the marker pickle. Expected at depth 1 as model.bin!/archive/data.pkl.

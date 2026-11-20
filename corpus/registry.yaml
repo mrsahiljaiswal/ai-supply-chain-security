@@ -1,0 +1,17 @@
+models:
+  - name: acme/tiny-base
+    revision: null
+    publisher: acme
+    root_sha256: 4af949ba6e98a9622faab99debc5159655c830777b9e709d04859e28fc356815
+    files:
+      config.json: 130815074e0b3c0c78d3300ac59b6311dcfd6f990a1ec3acdb0c9b62295db523
+      model.safetensors: 0b710ba164b9374e54d3176e09f7ad876991c0f4dac18c948f2e182eb7fd0aff
+    config:
+      model_type: tiny
+      architectures: [TinyForCausalLM]
+      hidden_size: 8
+      num_hidden_layers: 2
+      vocab_size: 32
+trusted_names:
+  - acme/tiny-base
+  - acme/tiny-adapter
