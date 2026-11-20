@@ -8,10 +8,15 @@ issues a Trusted / Conditional / Undetermined / Blocked verdict. This package im
    claims without loading any model (`hashvault/intake/`). Output: `ArtifactManifest` plus a list of
    intake `CheckResult`s.
 3. **Static scanner** and **provenance inspector** – evidence only. They do not classify the artifact.
-4. **Verdict engine** (`hashvault/verdict/`) – the only component that classifies. It writes a JSON
+4. **Behavioural inspector** (`hashvault/inspectors/behavioural/`) – a fixed probe bank. Eligibility
+   runs on the host and does not load weights. Generation runs in Docker
+   (`hashvault-behave:local`, network off, read-only mounts) or is skipped.
+5. **Verdict engine** (`hashvault/verdict/`) – the only component that classifies. It writes a JSON
    evidence bundle and chooses the process exit code.
 
-The behavioural inspector is not implemented. A live scan therefore does not return Trusted.
+A live scan reaches Trusted only when a provenance anchor is present, `behavioural_coverage` passed,
+`behavioural_marker` did not fail, and no warning remains. The corpus fixtures are not runnable
+language models. Eligibility fails closed on them, and a missing Docker engine is an error, not a pass.
 
 ## Install
 
@@ -29,7 +34,8 @@ hashvault intake ./models/support-bot-lora \
 hashvault intake --request scan.yaml        # same fields as ScanRequest; CLI flags override
 hashvault intake org/name@<rev> --allow-network --base ...   # needs huggingface_hub
 hashvault scan ./models/support-bot-lora \
-  --base Qwen/Qwen2.5-0.5B --registry policies/known-good.yaml --out ./reports/
+  --base Qwen/Qwen2.5-0.5B --base-dir ./cache/Qwen2.5-0.5B \
+  --registry policies/known-good.yaml --out ./reports/
 ```
 
 `intake` prints `{request, manifest, checks}` as JSON (and writes `<scan-id>.intake.json` to `--out`).

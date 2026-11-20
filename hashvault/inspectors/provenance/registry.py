@@ -33,6 +33,9 @@ class RegistryModel(BaseModel):
     root_sha256: str | None = None
     files: dict[str, str] = Field(default_factory=dict)
     config: RegistryConfig | None = None
+    # Host directory of base weights. The behavioural inspector reads this and
+    # does not download. Absent means the scan must pass --base-dir.
+    local_path: str | None = None
 
 
 class KnownGoodRegistry(BaseModel):

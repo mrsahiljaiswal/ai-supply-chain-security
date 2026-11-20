@@ -92,7 +92,11 @@ def _policy_severity(policy: Policy, check_id: str) -> str | None:
         if name in severities.model_fields:
             return getattr(policy.intake.severities, name)
         return None
-    for group in (policy.static.severities, policy.provenance.severities):
+    for group in (
+        policy.static.severities,
+        policy.provenance.severities,
+        policy.behavioural.severities,
+    ):
         if check_id in type(group).model_fields:
             return getattr(group, check_id)
     return None
@@ -189,17 +193,23 @@ def _has_provenance_anchor(reports: Sequence[InspectorReport]) -> bool:
 
 
 def _behavioural_passed(reports: Sequence[InspectorReport]) -> bool:
-    """True when a behavioural report's checks all passed.
+    """Coverage counts only when behavioural_coverage passed and the marker did not fail.
 
-    A skipped behavioural inspector is not coverage and is not an error.
+    A missing report, a skip, or an error is not coverage. status=error on a
+    required behavioural check is handled by ``_required_errors`` and is not a pass.
+    A skipped behavioural check is not an error.
     """
     behavioural = [report for report in reports if report.inspector == "behavioural"]
     if not behavioural:
         return False
+    coverage_passed = False
     for report in behavioural:
-        if not report.checks or any(check.status != "passed" for check in report.checks):
-            return False
-    return True
+        for check in report.checks:
+            if check.check_id == "behavioural_marker" and check.status == "failed":
+                return False
+            if check.check_id == "behavioural_coverage" and check.status == "passed":
+                coverage_passed = True
+    return coverage_passed
 
 
 def _verdict(

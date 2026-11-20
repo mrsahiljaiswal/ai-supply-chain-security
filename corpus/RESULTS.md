@@ -6,6 +6,8 @@ Quarantine directory: `/tmp/hashvault-corpus-scans`. Every command passes `--reg
 
 Exit 0 is Trusted. Exit 10 is Conditional (a warning, and no critical finding). Exit 20 is Undetermined. Exit 30 is Blocked (a critical finding). The behavioural inspector has not run, so a scan with no critical finding and no warning is Undetermined (`rule_insufficient_evidence`) and does not exit 0. A warning is `rule_warnings` and exits 10. Each command also passed `--out` pointing at a temp directory; that flag only places the JSON bundle and does not change the checks.
 
+Behavioural eligibility fails closed on this corpus. The registry rows have no `local_path`, and these commands do not pass `--base-dir`, so the reason is `base_weights_missing` (or the model is not executed because a static critical finding or a non-safetensors weight blocks the load). These fixtures are not runnable language models, and they are not behaviourally clean. A skipped behavioural report is not coverage. The exit codes below stay as recorded. Nothing here is Trusted.
+
 `provenance_hash_match` on `clean/tiny-full-model` passed. The check matched registry row `acme/tiny-base`, compared 2 files, and recorded root `4af949ba6e98a9622faab99debc5159655c830777b9e709d04859e28fc356815`. No `--publisher` was passed, so `provenance_publisher` is skipped (`publisher_not_claimed`) and there is no publisher warning.
 
 ## Summary

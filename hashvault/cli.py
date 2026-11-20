@@ -11,6 +11,9 @@ from hashvault import __version__
 from hashvault.contracts.checks import CheckResult
 from hashvault.contracts.manifest import ArtifactManifest
 from hashvault.contracts.request import ScanRequest
+from hashvault.inspectors.behavioural import InspectorReport as BehaviouralReport
+from hashvault.inspectors.behavioural import scan_behavioural
+from hashvault.inspectors.behavioural.probes import CHECK_IDS as BEHAVIOURAL_CHECKS
 from hashvault.inspectors.provenance import InspectorReport as ProvenanceReport
 from hashvault.inspectors.provenance import RegistryError, scan_provenance
 from hashvault.inspectors.static import InspectorReport, scan_static
@@ -142,6 +145,16 @@ def _provenance_failure(exc: Exception) -> ProvenanceReport:
     )
 
 
+def _behavioural_failure(exc: Exception) -> BehaviouralReport:
+    reason = f"{type(exc).__name__}: {exc}"
+    return BehaviouralReport(
+        version=__version__,
+        checks=[CheckResult(check_id=check_id, status="error", reason=reason) for check_id in BEHAVIOURAL_CHECKS],
+        findings=[],
+        coverage={"scanner_error": reason},
+    )
+
+
 ArtifactArg = Annotated[Optional[str], typer.Argument(help="Local dir/file/archive, or org/name@rev")]
 BaseOpt = Annotated[Optional[str], typer.Option("--base", help="Claimed base model id")]
 BaseRevOpt = Annotated[Optional[str], typer.Option("--base-revision")]
@@ -155,6 +168,7 @@ OutOpt = Annotated[Optional[Path], typer.Option("--out", help="Directory or .jso
 WorkOpt = Annotated[Optional[Path], typer.Option("--work-dir", help="Quarantine root (default ./work)")]
 RequestOpt = Annotated[Optional[Path], typer.Option("--request", help="YAML scan request file")]
 RegistryOpt = Annotated[Optional[Path], typer.Option("--registry", help="Known-good registry YAML")]
+BaseDirOpt = Annotated[Optional[Path], typer.Option("--base-dir", help="Local directory of base-model weights")]
 
 
 @app.command()
@@ -193,11 +207,13 @@ def scan(
     work_dir: WorkOpt = None,
     request: RequestOpt = None,
     registry: RegistryOpt = None,
+    base_dir: BaseDirOpt = None,
 ) -> None:
-    """Run intake, static, provenance, then the verdict engine.
+    """Run intake, static, provenance, and behavioural eligibility, then the verdict.
 
-    The behavioural inspector has no report yet, so a live scan does not reach
-    Trusted. The verdict engine chooses the exit code.
+    Weights are loaded only inside the behavioural container, and only after
+    eligibility. A skip or a container error does not reach Trusted. The verdict
+    engine chooses the exit code.
     """
     req, manifest, checks = _execute(artifact, base, base_revision, base_sha256, publisher, repo,
                                      artifact_type, policy, allow_network, out, work_dir, request)
@@ -217,7 +233,18 @@ def scan(
         prov_report = _provenance_failure(exc)
     except Exception as exc:
         prov_report = _provenance_failure(exc)
-    bundle = decide(req, manifest, checks, [static_report, prov_report], pol)
+    try:
+        behavioural_report = scan_behavioural(
+            req,
+            manifest,
+            static_report,
+            pol,
+            registry_path=str(registry) if registry else None,
+            base_dir=str(base_dir) if base_dir else None,
+        )
+    except Exception as exc:
+        behavioural_report = _behavioural_failure(exc)
+    bundle = decide(req, manifest, checks, [static_report, prov_report, behavioural_report], pol)
     text = render_bundle(bundle)
     _write_bundle(req, manifest.scan_id, text)
     sys.stdout.write(text)

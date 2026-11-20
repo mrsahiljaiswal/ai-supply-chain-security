@@ -33,7 +33,7 @@ python3 -m hashvault scan corpus/<name> --base <id> --registry corpus/registry.y
 
 `--base` is the claimed base model. Intake requires it when the artifact is a LoRA adapter. `--registry corpus/registry.yaml` is the provenance registry. On a CLI that has not grown `--registry` yet, run the same command without that flag; the file stays the contract for the inspector. Add `--work-dir` to keep quarantine copies out of the tree (the default is `./work`).
 
-`hashvault scan` runs intake, the static scanner, the provenance inspector, and the verdict engine. Exit 0 is Trusted, 10 is Conditional, 20 is Undetermined, and 30 is Blocked. The behavioural inspector does not run, so a scan with no critical finding and no warning is Undetermined. A warning with no critical finding is Conditional. A critical finding is Blocked.
+`hashvault scan` runs intake, the static scanner, the provenance inspector, the behavioural inspector, and the verdict engine. Exit 0 is Trusted, 10 is Conditional, 20 is Undetermined, and 30 is Blocked. These fixtures are not runnable language models. Behavioural eligibility fails closed (`base_weights_missing`, or the model is not executed), so a scan with no critical finding and no warning stays Undetermined. A warning with no critical finding is Conditional. A critical finding is Blocked. None of these fixtures is behaviourally clean.
 
 `scan.yaml` files are `ScanRequest` documents. Run one with `--request`. Paths inside them are relative to the repository root. The file also sits inside the artifact directory, so it is part of that artifact's inventory and root hash.
 

@@ -32,12 +32,27 @@ provenance:
     provenance_publisher: warning
     provenance_hub_metadata: warning
     provenance_attestation: info
+behavioural:
+  max_estimated_params: 500000000
+  kl_threshold_nats: 0.5
+  refusal_delta_threshold: 0.5
+  refusal_phrases:
+    - "i can't"
+    - "i cannot"
+    - "i won't"
+  severities:
+    behavioural_marker: critical
+    behavioural_kl: warning
+    behavioural_refusal: warning
+    behavioural_coverage: info
 verdict:
   # status=error on a listed check is Undetermined (rule_check_error).
   # Static weight checks count only when that check ran. provenance_hash_match
   # counts only when a registry entry exists. A skip for no_known_good_reference,
   # offline, no_attestation, publisher_not_claimed, or adapter_has_no_model_config
   # is a coverage gap, not a required-check error.
+  # behavioural_marker and behavioural_coverage are required only when eligibility
+  # passed. A skip is not an error. status=error on those checks is.
   required_checks:
     - pickle_opcode_scan
     - pickle_dangerous_callable
@@ -47,3 +62,5 @@ verdict:
     - npy_object_dtype
     - weight_coverage
     - provenance_hash_match
+    - behavioural_marker
+    - behavioural_coverage

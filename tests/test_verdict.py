@@ -189,7 +189,8 @@ def test_fake_behavioural_pass_with_anchor_is_trusted(fixtures):
             CheckResult(check_id="provenance_hash_match", status="passed"),
         ], coverage={"matched_model": "acme/tiny-base"}),
         _report("behavioural", checks=[
-            CheckResult(check_id="behavioural_comparison", status="passed"),
+            CheckResult(check_id="behavioural_marker", status="passed"),
+            CheckResult(check_id="behavioural_coverage", status="passed"),
         ]),
     ]
     verdict = _bundle(fixtures["full_model"], reports).verdict
