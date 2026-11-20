@@ -372,27 +372,35 @@ def test_severity_is_taken_from_policy(tmp_path, work_root):
     assert of(report, "pickle_dangerous_callable", "model.pkl")[0].severity == "warning"
 
 
+def _findings(payload):
+    return [item for report in payload["reports"] for item in report["findings"]]
+
+
 def test_cli_scan_os_system_exits_30(tmp_path, work_root):
     path = write(tmp_path / "cli-evil.pkl", global_reduce("os", "system"))
-    result = runner.invoke(app, ["scan", str(path), "--work-dir", str(work_root)])
+    result = runner.invoke(app, ["scan", str(path), "--work-dir", str(work_root), "--out", str(tmp_path / "out")])
     assert result.exit_code == 30, result.stdout
     payload = json.loads(result.stdout)
-    assert payload["verdict"] == "Blocked"
-    assert payload["findings"][0]["evidence"]["module"] == "os"
-    assert payload["findings"][0]["evidence"]["name"] == "system"
+    assert payload["verdict"]["classification"] == "Blocked"
+    assert payload["verdict"]["rule_id"] == "rule_critical"
+    findings = _findings(payload)
+    assert findings[0]["evidence"]["module"] == "os"
+    assert findings[0]["evidence"]["name"] == "system"
     assert result.exit_code != 0
 
 
-def test_cli_scan_clean_model_exits_20(fixtures, work_root):
+def test_cli_scan_clean_model_exits_20(fixtures, work_root, tmp_path):
     result = runner.invoke(app, [
         "scan", str(fixtures["full_model"]),
         "--base", "Qwen/Qwen2.5-0.5B",
         "--work-dir", str(work_root),
+        "--out", str(tmp_path / "out"),
     ])
     assert result.exit_code == 20, result.stdout
     payload = json.loads(result.stdout)
-    assert payload["verdict"] == "Undetermined"
-    assert "Undetermined" in payload["note"]
-    assert "behavioural inspector has not run" in payload["note"]
-    assert payload["findings"] == []
+    assert payload["verdict"]["classification"] == "Undetermined"
+    assert payload["verdict"]["rule_id"] == "rule_insufficient_evidence"
+    assert "Undetermined" in payload["verdict"]["reason"]
+    assert "behavioural inspector has not run" in payload["verdict"]["reason"]
+    assert _findings(payload) == []
     assert result.exit_code != 0

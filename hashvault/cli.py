@@ -16,14 +16,9 @@ from hashvault.inspectors.provenance import RegistryError, scan_provenance
 from hashvault.inspectors.static import InspectorReport, scan_static
 from hashvault.intake.pipeline import run_intake
 from hashvault.policy import PolicyError, load_policy
+from hashvault.verdict import decide, render_bundle
 
 EXIT_USAGE = 2
-EXIT_UNDETERMINED = 20
-EXIT_BLOCKED = 30
-UNDETERMINED_NOTE = (
-    "The verdict is Undetermined because the behavioural inspector has not run."
-)
-BLOCKED_NOTE = "Critical finding. The behavioural inspector has not run."
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="HashVault model artifact scanner")
 
@@ -109,15 +104,42 @@ def _emit(
     sys.stdout.write(text + "\n")
 
 
-def _scan_decision(*reports: InspectorReport | ProvenanceReport) -> tuple[str, str, int]:
-    """Interim gate. Behavioural has not run, so scan never exits 0 and never returns Trusted."""
-    findings = [finding for report in reports for finding in report.findings]
-    checks = [check for report in reports for check in report.checks]
-    if any(finding.severity == "critical" for finding in findings):
-        return "Blocked", BLOCKED_NOTE, EXIT_BLOCKED
-    if any(check.status == "error" for check in checks):
-        return "Undetermined", "A check status is error. " + UNDETERMINED_NOTE, EXIT_UNDETERMINED
-    return "Undetermined", UNDETERMINED_NOTE, EXIT_UNDETERMINED
+def _write_bundle(req: ScanRequest, scan_id: str, text: str) -> Path:
+    """Write the evidence bundle. ``--out`` is a directory, or a .json file path."""
+    if req.output_dir:
+        out = Path(req.output_dir)
+        if out.suffix == ".json":
+            out.parent.mkdir(parents=True, exist_ok=True)
+            dest = out
+        else:
+            out.mkdir(parents=True, exist_ok=True)
+            dest = out / f"hashvault-report-{scan_id}.json"
+    else:
+        dest = Path.cwd() / f"hashvault-report-{scan_id}.json"
+    dest.write_text(text, encoding="utf-8")
+    return dest
+
+
+def _static_failure(exc: Exception) -> InspectorReport:
+    return InspectorReport(
+        version=__version__,
+        checks=[CheckResult(
+            check_id="weight_coverage",
+            status="error",
+            reason=f"{type(exc).__name__}: {exc}",
+        )],
+        findings=[],
+        coverage={"scanner_error": f"{type(exc).__name__}: {exc}"},
+    )
+
+
+def _provenance_failure(exc: Exception) -> ProvenanceReport:
+    return ProvenanceReport(
+        version=__version__,
+        checks=[CheckResult(check_id="provenance_hash_match", status="error", reason=str(exc))],
+        findings=[],
+        coverage={"registry_error": str(exc)},
+    )
 
 
 ArtifactArg = Annotated[Optional[str], typer.Argument(help="Local dir/file/archive, or org/name@rev")]
@@ -129,7 +151,7 @@ RepoOpt = Annotated[Optional[str], typer.Option("--repo")]
 TypeOpt = Annotated[Optional[str], typer.Option("--type", help="full_model | lora_adapter | auto")]
 PolicyOpt = Annotated[Optional[str], typer.Option("--policy", help="Profile name or YAML path")]
 NetOpt = Annotated[bool, typer.Option("--allow-network", help="Permit Hugging Face hub access")]
-OutOpt = Annotated[Optional[Path], typer.Option("--out", help="Directory for the JSON output")]
+OutOpt = Annotated[Optional[Path], typer.Option("--out", help="Directory or .json path for the evidence bundle")]
 WorkOpt = Annotated[Optional[Path], typer.Option("--work-dir", help="Quarantine root (default ./work)")]
 RequestOpt = Annotated[Optional[Path], typer.Option("--request", help="YAML scan request file")]
 RegistryOpt = Annotated[Optional[Path], typer.Option("--registry", help="Known-good registry YAML")]
@@ -172,10 +194,10 @@ def scan(
     request: RequestOpt = None,
     registry: RegistryOpt = None,
 ) -> None:
-    """Run intake, the static scanner, and the provenance inspector.
+    """Run intake, static, provenance, then the verdict engine.
 
-    The behavioural inspector is not run, so the verdict stays Undetermined unless a
-    critical finding blocks the artifact. hashvault scan never exits 0.
+    The behavioural inspector has no report yet, so a live scan does not reach
+    Trusted. The verdict engine chooses the exit code.
     """
     req, manifest, checks = _execute(artifact, base, base_revision, base_sha256, publisher, repo,
                                      artifact_type, policy, allow_network, out, work_dir, request)
@@ -186,36 +208,25 @@ def scan(
     try:
         static_report = scan_static(manifest, pol)
     except Exception as exc:
-        note = f"Static scanner failed ({type(exc).__name__}: {exc}). {UNDETERMINED_NOTE}"
-        _emit(req, manifest, checks, {
-            "verdict": "Undetermined",
-            "note": note,
-            "findings": [],
-        }, kind="scan")
-        typer.echo(f"hashvault: {note}", err=True)
-        raise typer.Exit(EXIT_UNDETERMINED)
+        static_report = _static_failure(exc)
     try:
         prov_report = scan_provenance(req, manifest, pol, registry_path=registry)
     except RegistryError as exc:
         if not any(finding.severity == "critical" for finding in static_report.findings):
             _fail_usage(str(exc))
-        prov_report = ProvenanceReport(
-            version=__version__,
-            checks=[CheckResult(check_id="provenance_hash_match", status="error", reason=str(exc))],
-            findings=[],
-            coverage={"registry_error": str(exc)},
-        )
-    verdict, note, code = _scan_decision(static_report, prov_report)
-    findings = list(static_report.findings) + list(prov_report.findings)
-    _emit(req, manifest, checks, {
-        "static": json.loads(static_report.model_dump_json()),
-        "provenance": json.loads(prov_report.model_dump_json()),
-        "findings": [json.loads(item.model_dump_json()) for item in findings],
-        "verdict": verdict,
-        "note": note,
-    }, kind="scan")
-    typer.echo(f"hashvault: {note}", err=True)
-    raise typer.Exit(code)
+        prov_report = _provenance_failure(exc)
+    except Exception as exc:
+        prov_report = _provenance_failure(exc)
+    bundle = decide(req, manifest, checks, [static_report, prov_report], pol)
+    text = render_bundle(bundle)
+    _write_bundle(req, manifest.scan_id, text)
+    sys.stdout.write(text)
+    verdict = bundle.verdict
+    typer.echo(
+        f"hashvault: {verdict.classification} {verdict.rule_id}: {verdict.reason}",
+        err=True,
+    )
+    raise typer.Exit(verdict.exit_code)
 
 
 def main() -> None:

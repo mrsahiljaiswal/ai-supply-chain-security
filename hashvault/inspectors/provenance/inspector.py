@@ -269,6 +269,17 @@ def _check_config(
     policy: Policy,
 ) -> tuple[CheckResult, list[Finding]]:
     check_id = "provenance_config"
+    # Field comparison is only meaningful for a full model whose claimed base
+    # selects a registry config. A LoRA ships adapter_config.json, which has no
+    # hidden_size, and that absence is not a config mismatch.
+    if manifest.artifact_type == "lora_adapter":
+        return _result(check_id, "not_applicable", reason="adapter_has_no_model_config", details={
+            "artifact_type": manifest.artifact_type,
+        }), []
+    if manifest.artifact_type != "full_model":
+        return _result(check_id, "not_applicable", reason="not_full_model", details={
+            "artifact_type": manifest.artifact_type,
+        }), []
     entry = _base_entry(request, registry)
     specified = _specified_config(entry.config) if entry and entry.config else {}
     if not specified:
@@ -410,15 +421,21 @@ def _check_publisher(
     policy: Policy,
 ) -> tuple[CheckResult, list[Finding]]:
     check_id = "provenance_publisher"
+    claimed = request.claimed_publisher.strip() if request.claimed_publisher and request.claimed_publisher.strip() else None
+    if not claimed:
+        # The user did not pass --publisher. That is not a disagreement with the registry.
+        return _result(check_id, "skipped", reason="publisher_not_claimed", details={
+            "claimed_publisher": None,
+        }), []
     entry = _artifact_entry(request, manifest, registry)
     publisher = entry.publisher.strip() if entry and entry.publisher and entry.publisher.strip() else None
     if not publisher:
-        # No registry publisher to compare. Offline or online, this is not a pass.
+        # A claimed publisher with nothing in the registry to compare against is not a pass.
         return _result(check_id, "skipped", reason="publisher_unverified", details={
             "matched": entry.name if entry else None,
+            "claimed_publisher": claimed,
             "allow_network": request.allow_network,
         }), []
-    claimed = request.claimed_publisher.strip() if request.claimed_publisher else None
     evidence = {"matched": entry.name, "expected": publisher, "actual": claimed}
     if claimed == publisher:
         return _result(check_id, "passed", details=evidence), []

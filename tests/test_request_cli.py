@@ -115,7 +115,12 @@ def test_cli_policy_yaml_path(fixtures, tmp_path, work_root):
     assert checks["intake.limits"]["status"] == "error"
 
 
-def test_cli_scan_stub_is_undetermined(fixtures, work_root):
-    r = run("scan", fixtures["full_model"], "--base", "Qwen/Qwen2.5-0.5B", "--work-dir", work_root)
+def test_cli_scan_stub_is_undetermined(fixtures, work_root, tmp_path):
+    r = run(
+        "scan", fixtures["full_model"], "--base", "Qwen/Qwen2.5-0.5B",
+        "--work-dir", work_root, "--out", tmp_path / "out",
+    )
     assert r.exit_code == 20
-    assert json.loads(r.stdout)["verdict"] == "Undetermined"
+    verdict = json.loads(r.stdout)["verdict"]
+    assert verdict["classification"] == "Undetermined"
+    assert verdict["exit_code"] == 20

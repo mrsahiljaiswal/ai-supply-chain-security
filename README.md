@@ -1,15 +1,17 @@
-# HashVault (intake stage)
+# HashVault
 
-HashVault scans model artifacts (full weights or LoRA adapters plus a claimed base model) and will
-issue a Trusted / Conditional / Undetermined / Blocked verdict. This package currently implements the
-first two components from `docs/input-components-plan.md`:
+HashVault scans model artifacts (full weights or LoRA adapters plus a claimed base model) and
+issues a Trusted / Conditional / Undetermined / Blocked verdict. This package implements:
 
 1. **Model Artifact / `ScanRequest`** – validated request contract (`hashvault/contracts/request.py`).
 2. **Artifact Intake & Manifest** – stage, inventory, expand, detect, hash, classify and extract
    claims without loading any model (`hashvault/intake/`). Output: `ArtifactManifest` plus a list of
    intake `CheckResult`s.
+3. **Static scanner** and **provenance inspector** – evidence only. They do not classify the artifact.
+4. **Verdict engine** (`hashvault/verdict/`) – the only component that classifies. It writes a JSON
+   evidence bundle and chooses the process exit code.
 
-The static, provenance and behavioural inspectors and the verdict engine are not implemented yet.
+The behavioural inspector is not implemented. A live scan therefore does not return Trusted.
 
 ## Install
 
@@ -26,16 +28,20 @@ hashvault intake ./models/support-bot-lora \
 
 hashvault intake --request scan.yaml        # same fields as ScanRequest; CLI flags override
 hashvault intake org/name@<rev> --allow-network --base ...   # needs huggingface_hub
-hashvault scan ...                          # stub: runs intake, exits 20 (Undetermined)
+hashvault scan ./models/support-bot-lora \
+  --base Qwen/Qwen2.5-0.5B --registry policies/known-good.yaml --out ./reports/
 ```
 
 `intake` prints `{request, manifest, checks}` as JSON (and writes `<scan-id>.intake.json` to `--out`).
+`scan` prints the evidence bundle as JSON and writes `hashvault-report-<scan-id>.json` to `--out`
+(a directory, or a `.json` file path). With no `--out`, that file is written in the working directory.
 Staged files live in `--work-dir` (default `./work`, or `$HASHVAULT_WORK_DIR`) under
 `<scan-id>/artifact/` (copied input) and `<scan-id>/expanded/` (archive members, stored as numbered
 blobs and never by member name). Both are made read-only after intake.
 
 Exit codes: `2` usage error (bad field, missing path, unknown policy, LoRA without `--base`, hub id
-without `--allow-network`); `intake` otherwise exits `0`; the `scan` stub exits `20`.
+without `--allow-network`); `intake` otherwise exits `0`. `scan` exits with the verdict code:
+`0` Trusted, `10` Conditional, `20` Undetermined, `30` Blocked.
 
 Example `scan.yaml`:
 

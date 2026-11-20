@@ -33,7 +33,7 @@ python3 -m hashvault scan corpus/<name> --base <id> --registry corpus/registry.y
 
 `--base` is the claimed base model. Intake requires it when the artifact is a LoRA adapter. `--registry corpus/registry.yaml` is the provenance registry. On a CLI that has not grown `--registry` yet, run the same command without that flag; the file stays the contract for the inspector. Add `--work-dir` to keep quarantine copies out of the tree (the default is `./work`).
 
-The interim gate exits 20 (Undetermined) when the static scanner reports no critical finding, because provenance and behavioural have not produced a verdict. It exits 30 (Blocked) when a static finding is critical. A Trusted exit of 0 waits for the verdict engine.
+`hashvault scan` runs intake, the static scanner, the provenance inspector, and the verdict engine. Exit 0 is Trusted, 10 is Conditional, 20 is Undetermined, and 30 is Blocked. The behavioural inspector does not run, so a scan with no critical finding and no warning is Undetermined. A warning with no critical finding is Conditional. A critical finding is Blocked.
 
 `scan.yaml` files are `ScanRequest` documents. Run one with `--request`. Paths inside them are relative to the repository root. The file also sits inside the artifact directory, so it is part of that artifact's inventory and root hash.
 
@@ -46,7 +46,7 @@ The interim gate exits 20 (Undetermined) when the static scanner reports no crit
 | `suspicious/trailing-bytes` | `python3 -m hashvault scan corpus/suspicious/trailing-bytes --base acme/tiny-base --registry corpus/registry.yaml` |
 | `suspicious/spoofed-base` | `python3 -m hashvault scan corpus/suspicious/spoofed-base --base acme/tiny-base --registry corpus/registry.yaml` |
 | `suspicious/lookalike-name` | `python3 -m hashvault scan corpus/suspicious/lookalike-name --repo acme/tiny-bose --registry corpus/registry.yaml` |
-| `suspicious/config-mismatch` | `python3 -m hashvault scan corpus/suspicious/config-mismatch --repo acme/tiny-base --registry corpus/registry.yaml` |
+| `suspicious/config-mismatch` | `python3 -m hashvault scan corpus/suspicious/config-mismatch --base acme/tiny-base --repo acme/tiny-base --registry corpus/registry.yaml` |
 | `suspicious/hash-mismatch` | `python3 -m hashvault scan --request corpus/suspicious/hash-mismatch/scan.yaml --registry corpus/registry.yaml` |
 | `suspicious/nested-torch-zip` | `python3 -m hashvault scan corpus/suspicious/nested-torch-zip --base acme/tiny-base --registry corpus/registry.yaml` |
 
@@ -88,7 +88,7 @@ The clean full-model files, plus `scan.yaml` claiming `claimed_repo: acme/tiny-b
 
 ### `suspicious/config-mismatch`
 
-The clean weights. `config.json` sets `hidden_size` to 999. The registry config for `acme/tiny-base` says 8. Expected check `provenance_config`, severity warning. Scan with `--repo acme/tiny-base`. The config file hash, and therefore the root hash, also differs from the registry because the JSON bytes changed.
+The clean weights. `config.json` sets `hidden_size` to 999. The registry config for `acme/tiny-base` says 8. Expected check `provenance_config`, severity warning. Scan with `--base acme/tiny-base` and `--repo acme/tiny-base`. `--base` selects the registry config so the `hidden_size` comparison runs. The config file hash, and therefore the root hash, also differs from the registry because the JSON bytes changed, so `provenance_hash_match` is critical as well. That hash result is kept.
 
 ### `suspicious/hash-mismatch`
 

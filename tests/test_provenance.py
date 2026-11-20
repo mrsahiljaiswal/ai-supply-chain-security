@@ -2,6 +2,7 @@
 
 import json
 import sys
+import tempfile
 import types
 from pathlib import Path
 
@@ -57,12 +58,29 @@ def findings(report, check_id):
     return [item for item in report.findings if item.check_id == check_id]
 
 
+def classification(payload):
+    verdict = payload["verdict"]
+    return verdict["classification"] if isinstance(verdict, dict) else verdict
+
+
+def bundle_findings(payload):
+    return [item for report in payload["reports"] for item in report["findings"]]
+
+
+def bundle_checks(payload, inspector):
+    report = next(item for item in payload["reports"] if item["inspector"] == inspector)
+    return report["checks"]
+
+
 def global_reduce(module: str, name: str) -> bytes:
     return b"\x80\x02c" + module.encode("ascii") + b"\n" + name.encode("ascii") + b"\n)R."
 
 
 def invoke_scan(*args):
-    return runner.invoke(app, ["scan", *[str(arg) for arg in args]])
+    argv = [str(arg) for arg in args]
+    if "--out" not in argv:
+        argv.extend(["--out", tempfile.mkdtemp(prefix="hv-scan-")])
+    return runner.invoke(app, ["scan", *argv])
 
 
 def test_root_hash_match_passes(fixtures, work_root, tmp_path):
@@ -99,14 +117,14 @@ def test_root_hash_mismatch_is_critical_and_scan_exits_30(fixtures, work_root, t
     )
     assert result.exit_code == 30, result.stdout
     payload = json.loads(result.stdout)
-    assert payload["verdict"] == "Blocked"
+    assert classification(payload) == "Blocked"
     assert result.exit_code != 0
-    finding = next(item for item in payload["findings"] if item["check_id"] == "provenance_hash_match")
+    finding = next(item for item in bundle_findings(payload) if item["check_id"] == "provenance_hash_match")
     assert finding["severity"] == "critical"
     assert finding["evidence"]["file"] == "<root>"
     assert finding["evidence"]["expected"] == "0" * 64
     assert finding["evidence"]["actual"] != finding["evidence"]["expected"]
-    check = next(item for item in payload["provenance"]["checks"] if item["check_id"] == "provenance_hash_match")
+    check = next(item for item in bundle_checks(payload, "provenance") if item["check_id"] == "provenance_hash_match")
     assert check["status"] == "failed" and check["severity"] == "critical"
 
 
@@ -138,12 +156,12 @@ def test_no_registry_entry_skips_and_scan_exits_20(fixtures, work_root, tmp_path
     )
     assert result.exit_code == 20, result.stdout
     payload = json.loads(result.stdout)
-    assert payload["verdict"] == "Undetermined"
-    check = next(item for item in payload["provenance"]["checks"] if item["check_id"] == "provenance_hash_match")
+    assert classification(payload) == "Undetermined"
+    check = next(item for item in bundle_checks(payload, "provenance") if item["check_id"] == "provenance_hash_match")
     assert check["status"] == "skipped"
     assert check["reason"] == "no_known_good_reference"
     assert check["status"] != "passed"
-    assert payload["findings"] == []
+    assert bundle_findings(payload) == []
     assert result.exit_code != 0
 
 
@@ -205,6 +223,26 @@ def test_config_hidden_size_mismatch_names_the_field(fixtures, work_root, tmp_pa
     assert finding.evidence["expected"]["hidden_size"] == 896
     assert finding.evidence["actual"]["hidden_size"] == 8
     assert "hidden_size" in finding.message
+
+
+def test_lora_config_is_not_applicable(fixtures, work_root, tmp_path):
+    registry = write_registry(tmp_path / "reg.yaml", [
+        model_entry("Qwen/Qwen2.5-0.5B", config={
+            "model_type": "qwen2",
+            "architectures": ["Qwen2ForCausalLM"],
+            "hidden_size": 8,
+            "num_hidden_layers": 1,
+            "vocab_size": 32,
+        }),
+    ])
+    _req, _manifest, report = scanned(
+        fixtures["lora"], work_root, registry, claimed_base_model="Qwen/Qwen2.5-0.5B",
+    )
+    check = one(report, "provenance_config")
+    assert check.status == "not_applicable"
+    assert check.reason == "adapter_has_no_model_config"
+    assert findings(report, "provenance_config") == []
+    assert one(report, "provenance_base_claim").status == "passed"
 
 
 def test_config_without_reference_skips(fixtures, work_root):
@@ -270,8 +308,31 @@ def test_publisher_mismatch_is_warning_and_missing_publisher_is_not_passed(fixtu
     _req, _manifest, report = scanned(fixtures["full_model"], work_root, claimed_base_model="Qwen/Qwen2.5-0.5B")
     check = one(report, "provenance_publisher")
     assert check.status == "skipped"
-    assert check.reason == "publisher_unverified"
+    assert check.reason == "publisher_not_claimed"
     assert check.status != "passed"
+    assert findings(report, "provenance_publisher") == []
+
+    _req, _manifest, report = scanned(
+        fixtures["full_model"], work_root,
+        claimed_base_model="Qwen/Qwen2.5-0.5B",
+        claimed_publisher="Qwen",
+    )
+    check = one(report, "provenance_publisher")
+    assert check.status == "skipped"
+    assert check.reason == "publisher_unverified"
+    assert findings(report, "provenance_publisher") == []
+
+    registry = write_registry(tmp_path / "with-publisher.yaml", [
+        model_entry("Qwen/Qwen2.5-0.5B", publisher="Qwen"),
+    ])
+    _req, _manifest, report = scanned(
+        fixtures["full_model"], work_root, registry,
+        claimed_base_model="Qwen/Qwen2.5-0.5B",
+    )
+    check = one(report, "provenance_publisher")
+    assert check.status == "skipped"
+    assert check.reason == "publisher_not_claimed"
+    assert findings(report, "provenance_publisher") == []
 
 
 def test_hub_offline_skips(fixtures, work_root):
@@ -285,8 +346,8 @@ def test_hub_missing_library_is_error_and_scan_exits_20(monkeypatch, work_root):
     result = invoke_scan("acme/tiny-model@main", "--allow-network", "--work-dir", work_root)
     assert result.exit_code == 20, result.stdout
     payload = json.loads(result.stdout)
-    assert payload["verdict"] == "Undetermined"
-    check = next(item for item in payload["provenance"]["checks"] if item["check_id"] == "provenance_hub_metadata")
+    assert classification(payload) == "Undetermined"
+    check = next(item for item in bundle_checks(payload, "provenance") if item["check_id"] == "provenance_hub_metadata")
     assert check["status"] == "error"
     assert check["reason"] == "huggingface_hub_missing"
     assert result.exit_code != 0
@@ -325,10 +386,10 @@ def test_hub_mocked_failure_is_error_and_scan_exits_20(monkeypatch, work_root):
     result = invoke_scan("acme/tiny-model@main", "--allow-network", "--work-dir", work_root)
     assert result.exit_code == 20, result.stdout
     payload = json.loads(result.stdout)
-    check = next(item for item in payload["provenance"]["checks"] if item["check_id"] == "provenance_hub_metadata")
+    check = next(item for item in bundle_checks(payload, "provenance") if item["check_id"] == "provenance_hub_metadata")
     assert check["status"] == "error"
     assert "hub metadata failed" in check["reason"]
-    assert payload["verdict"] == "Undetermined"
+    assert classification(payload) == "Undetermined"
     assert result.exit_code != 0
 
 
@@ -359,10 +420,10 @@ def test_os_system_pickle_still_exits_30_when_provenance_skips(tmp_path, work_ro
     result = invoke_scan(path, "--work-dir", work_root)
     assert result.exit_code == 30, result.stdout
     payload = json.loads(result.stdout)
-    assert payload["verdict"] == "Blocked"
-    assert payload["findings"][0]["evidence"]["module"] == "os"
-    assert payload["findings"][0]["evidence"]["name"] == "system"
-    skipped = next(item for item in payload["provenance"]["checks"] if item["check_id"] == "provenance_hash_match")
+    assert classification(payload) == "Blocked"
+    assert bundle_findings(payload)[0]["evidence"]["module"] == "os"
+    assert bundle_findings(payload)[0]["evidence"]["name"] == "system"
+    skipped = next(item for item in bundle_checks(payload, "provenance") if item["check_id"] == "provenance_hash_match")
     assert skipped["status"] == "skipped"
     assert skipped["reason"] == "no_known_good_reference"
     assert result.exit_code != 0
@@ -420,4 +481,4 @@ def test_missing_registry_file_is_usage_error_unless_static_is_critical(tmp_path
     blocked = invoke_scan(evil, "--registry", missing, "--work-dir", work_root)
     assert blocked.exit_code == 30, blocked.stdout
     payload = json.loads(blocked.stdout)
-    assert payload["findings"][0]["evidence"]["name"] == "system"
+    assert bundle_findings(payload)[0]["evidence"]["name"] == "system"

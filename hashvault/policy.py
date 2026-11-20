@@ -84,6 +84,32 @@ class ProvenancePolicy(BaseModel):
     severities: ProvenanceSeverities = Field(default_factory=ProvenanceSeverities)
 
 
+# Static weight checks are required when they ran. provenance_hash_match is
+# required only when a registry entry exists (the verdict engine applies that).
+DEFAULT_REQUIRED_CHECKS = (
+    "pickle_opcode_scan",
+    "pickle_dangerous_callable",
+    "pickle_unknown_global",
+    "safetensors_structure",
+    "safetensors_trailing_bytes",
+    "npy_object_dtype",
+    "weight_coverage",
+    "provenance_hash_match",
+)
+
+
+class VerdictPolicy(BaseModel):
+    """Which checks the verdict engine treats as required.
+
+    A required check with status ``error`` is Undetermined. A skip whose reason
+    is a coverage gap is not a required-check error.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    required_checks: list[str] = Field(default_factory=lambda: list(DEFAULT_REQUIRED_CHECKS))
+
+
 class Policy(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -91,6 +117,7 @@ class Policy(BaseModel):
     intake: IntakePolicy = Field(default_factory=IntakePolicy)
     static: StaticPolicy = Field(default_factory=StaticPolicy)
     provenance: ProvenancePolicy = Field(default_factory=ProvenancePolicy)
+    verdict: VerdictPolicy = Field(default_factory=VerdictPolicy)
 
 
 BUILTIN_PROFILES = {"strict"}
