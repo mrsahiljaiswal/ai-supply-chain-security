@@ -23,3 +23,12 @@ static:
     safetensors_trailing_bytes: critical
     npy_object_dtype: critical
     custom_code_present: warning
+provenance:
+  severities:
+    provenance_hash_match: critical
+    provenance_base_claim: warning
+    provenance_config: warning
+    provenance_typosquat: warning
+    provenance_publisher: warning
+    provenance_hub_metadata: warning
+    provenance_attestation: info

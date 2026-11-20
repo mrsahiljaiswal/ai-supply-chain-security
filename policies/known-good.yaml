@@ -1,0 +1,4 @@
+# An empty registry makes provenance checks skip. A skip is a coverage gap,
+# not a pass, which keeps the verdict from being Trusted.
+models: []
+trusted_names: []

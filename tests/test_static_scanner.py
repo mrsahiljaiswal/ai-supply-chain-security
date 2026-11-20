@@ -393,6 +393,6 @@ def test_cli_scan_clean_model_exits_20(fixtures, work_root):
     payload = json.loads(result.stdout)
     assert payload["verdict"] == "Undetermined"
     assert "Undetermined" in payload["note"]
-    assert "provenance and behavioural have not run" in payload["note"]
+    assert "behavioural inspector has not run" in payload["note"]
     assert payload["findings"] == []
     assert result.exit_code != 0

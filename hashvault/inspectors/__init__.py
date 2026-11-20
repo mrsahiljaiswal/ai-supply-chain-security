@@ -1,1 +1,1 @@
-"""HashVault inspectors. The static scanner never deserializes an artifact."""
+"""HashVault inspectors. Static and provenance run on the host and never deserialize an artifact."""

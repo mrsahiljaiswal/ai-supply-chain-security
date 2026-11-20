@@ -7,9 +7,12 @@ import typer
 import yaml
 from pydantic import ValidationError
 
+from hashvault import __version__
 from hashvault.contracts.checks import CheckResult
 from hashvault.contracts.manifest import ArtifactManifest
 from hashvault.contracts.request import ScanRequest
+from hashvault.inspectors.provenance import InspectorReport as ProvenanceReport
+from hashvault.inspectors.provenance import RegistryError, scan_provenance
 from hashvault.inspectors.static import InspectorReport, scan_static
 from hashvault.intake.pipeline import run_intake
 from hashvault.policy import PolicyError, load_policy
@@ -18,8 +21,9 @@ EXIT_USAGE = 2
 EXIT_UNDETERMINED = 20
 EXIT_BLOCKED = 30
 UNDETERMINED_NOTE = (
-    "The verdict is Undetermined because provenance and behavioural have not run."
+    "The verdict is Undetermined because the behavioural inspector has not run."
 )
+BLOCKED_NOTE = "Critical finding. The behavioural inspector has not run."
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="HashVault model artifact scanner")
 
@@ -105,22 +109,14 @@ def _emit(
     sys.stdout.write(text + "\n")
 
 
-def _static_decision(report: InspectorReport) -> tuple[str, str, int]:
-    """Interim gate. Only a full verdict engine may return Trusted, so scan never exits 0."""
-    critical = [f for f in report.findings if f.severity == "critical"]
-    errors = [c for c in report.checks if c.status == "error"]
-    if critical:
-        return (
-            "Blocked",
-            "Critical static finding. Provenance and behavioural have not run.",
-            EXIT_BLOCKED,
-        )
-    if errors:
-        return (
-            "Undetermined",
-            "A static check status is error. " + UNDETERMINED_NOTE,
-            EXIT_UNDETERMINED,
-        )
+def _scan_decision(*reports: InspectorReport | ProvenanceReport) -> tuple[str, str, int]:
+    """Interim gate. Behavioural has not run, so scan never exits 0 and never returns Trusted."""
+    findings = [finding for report in reports for finding in report.findings]
+    checks = [check for report in reports for check in report.checks]
+    if any(finding.severity == "critical" for finding in findings):
+        return "Blocked", BLOCKED_NOTE, EXIT_BLOCKED
+    if any(check.status == "error" for check in checks):
+        return "Undetermined", "A check status is error. " + UNDETERMINED_NOTE, EXIT_UNDETERMINED
     return "Undetermined", UNDETERMINED_NOTE, EXIT_UNDETERMINED
 
 
@@ -136,6 +132,7 @@ NetOpt = Annotated[bool, typer.Option("--allow-network", help="Permit Hugging Fa
 OutOpt = Annotated[Optional[Path], typer.Option("--out", help="Directory for the JSON output")]
 WorkOpt = Annotated[Optional[Path], typer.Option("--work-dir", help="Quarantine root (default ./work)")]
 RequestOpt = Annotated[Optional[Path], typer.Option("--request", help="YAML scan request file")]
+RegistryOpt = Annotated[Optional[Path], typer.Option("--registry", help="Known-good registry YAML")]
 
 
 @app.command()
@@ -173,8 +170,13 @@ def scan(
     out: OutOpt = None,
     work_dir: WorkOpt = None,
     request: RequestOpt = None,
+    registry: RegistryOpt = None,
 ) -> None:
-    """Run intake and the static scanner. Provenance and behavioural are not run."""
+    """Run intake, the static scanner, and the provenance inspector.
+
+    The behavioural inspector is not run, so the verdict stays Undetermined unless a
+    critical finding blocks the artifact. hashvault scan never exits 0.
+    """
     req, manifest, checks = _execute(artifact, base, base_revision, base_sha256, publisher, repo,
                                      artifact_type, policy, allow_network, out, work_dir, request)
     try:
@@ -182,7 +184,7 @@ def scan(
     except PolicyError as exc:
         _fail_usage(str(exc))
     try:
-        report = scan_static(manifest, pol)
+        static_report = scan_static(manifest, pol)
     except Exception as exc:
         note = f"Static scanner failed ({type(exc).__name__}: {exc}). {UNDETERMINED_NOTE}"
         _emit(req, manifest, checks, {
@@ -192,10 +194,23 @@ def scan(
         }, kind="scan")
         typer.echo(f"hashvault: {note}", err=True)
         raise typer.Exit(EXIT_UNDETERMINED)
-    verdict, note, code = _static_decision(report)
+    try:
+        prov_report = scan_provenance(req, manifest, pol, registry_path=registry)
+    except RegistryError as exc:
+        if not any(finding.severity == "critical" for finding in static_report.findings):
+            _fail_usage(str(exc))
+        prov_report = ProvenanceReport(
+            version=__version__,
+            checks=[CheckResult(check_id="provenance_hash_match", status="error", reason=str(exc))],
+            findings=[],
+            coverage={"registry_error": str(exc)},
+        )
+    verdict, note, code = _scan_decision(static_report, prov_report)
+    findings = list(static_report.findings) + list(prov_report.findings)
     _emit(req, manifest, checks, {
-        "static": json.loads(report.model_dump_json()),
-        "findings": [json.loads(f.model_dump_json()) for f in report.findings],
+        "static": json.loads(static_report.model_dump_json()),
+        "provenance": json.loads(prov_report.model_dump_json()),
+        "findings": [json.loads(item.model_dump_json()) for item in findings],
         "verdict": verdict,
         "note": note,
     }, kind="scan")

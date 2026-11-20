@@ -64,12 +64,33 @@ class StaticPolicy(BaseModel):
     severities: StaticSeverities = Field(default_factory=StaticSeverities)
 
 
+class ProvenanceSeverities(BaseModel):
+    """Default severities for provenance checks. The inspector does not hard-code these."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provenance_hash_match: Severity = "critical"
+    provenance_base_claim: Severity = "warning"
+    provenance_config: Severity = "warning"
+    provenance_typosquat: Severity = "warning"
+    provenance_publisher: Severity = "warning"
+    provenance_hub_metadata: Severity = "warning"
+    provenance_attestation: Severity = "info"
+
+
+class ProvenancePolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    severities: ProvenanceSeverities = Field(default_factory=ProvenanceSeverities)
+
+
 class Policy(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     name: str = "strict"
     intake: IntakePolicy = Field(default_factory=IntakePolicy)
     static: StaticPolicy = Field(default_factory=StaticPolicy)
+    provenance: ProvenancePolicy = Field(default_factory=ProvenancePolicy)
 
 
 BUILTIN_PROFILES = {"strict"}
